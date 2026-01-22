@@ -74,22 +74,56 @@ window.filterBands = () => {
     });
 };
 
-// 4. DATABASE ACTIONS
+// --- NEW: VOTING LIMIT LOGIC ---
+
+function canUserVote() {
+    const today = new Date().toLocaleDateString(); // e.g., "1/22/2026"
+    const voteData = JSON.parse(localStorage.getItem('user_votes')) || { date: today, count: 0 };
+
+    // Reset counter if it's a new day
+    if (voteData.date !== today) {
+        voteData.date = today;
+        voteData.count = 0;
+    }
+
+    if (voteData.count >= 5) {
+        alert("You've reached your limit of 5 votes for today! Come back tomorrow.");
+        return false;
+    }
+
+    // Increment and save
+    voteData.count += 1;
+    localStorage.setItem('user_votes', JSON.stringify(voteData));
+    return true;
+}
+
+// --- UPDATED DATABASE ACTIONS ---
+
+window.changeVote = async (id, newScore) => {
+    // Only allow the vote if the user hasn't hit their daily limit
+    if (!canUserVote()) return;
+
+    const bandRef = doc(db, 'bands', id);
+    try {
+        await updateDoc(bandRef, { 
+            score: newScore,
+            lastVotedAt: Date.now() 
+        });
+    } catch (error) {
+        console.error("Error updating vote: ", error);
+    }
+};
+
 window.addBand = async () => {
     const input = document.getElementById('bandInput');
     if (!input.value.trim()) return;
+
     await addDoc(bandsCol, {
         name: input.value,
         score: 0,
-        lastVotedAt: Date.now()
+        lastVotedAt: Date.now(),
+        createdAt: Date.now()
     });
     input.value = "";
 };
 
-window.changeVote = async (id, newScore) => {
-    const bandRef = doc(db, 'bands', id);
-    await updateDoc(bandRef, { 
-        score: newScore,
-        lastVotedAt: Date.now() 
-    });
-};
