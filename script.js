@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getFirestore, collection, addDoc, onSnapshot, updateDoc, doc, query, orderBy, limit } 
+import { getFirestore, collection, addDoc, onSnapshot, updateDoc, doc, query, orderBy, limit, increment } 
        from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // PASTE YOUR FIREBASE CONFIG HERE
@@ -65,52 +65,67 @@ window.filterBands = () => {
         li.innerHTML = `
             <span>${badge} ${band.name}</span>
             <div class="vote-btns">
-                <button onclick="changeVote('${band.id}', ${band.score + 1})">▲</button>
+                <button onclick="changeVote('${band.id}', 1)">▲</button>
                 <span class="score">${band.score}</span>
-                <button onclick="changeVote('${band.id}', ${band.score - 1})">▼</button>
+                <button onclick="changeVote('${band.id}', -1)">▼</button>
             </div>
         `;
         list.appendChild(li);
     });
 };
 
-// --- NEW: VOTING LIMIT LOGIC ---
+// --- NEW: VOTING LIMIT LOGIC (per-band, per-day) ---
 
-function canUserVote() {
-    const today = new Date().toLocaleDateString(); // e.g., "1/22/2026"
-    const voteData = JSON.parse(localStorage.getItem('user_votes')) || { date: today, count: 0 };
+// Returns true if the user can vote on bandId today (doesn't change storage)
+function canUserVote(bandId) {
+    const today = new Date().toISOString().slice(0,10); // YYYY-MM-DD
+    const voteData = JSON.parse(localStorage.getItem('user_votes')) || { date: today, bands: {} };
 
-    // Reset counter if it's a new day
+    // Reset if it's a new day
     if (voteData.date !== today) {
-        voteData.date = today;
-        voteData.count = 0;
+        return true; // no votes yet today
     }
 
-    if (voteData.count >= 5) {
-        alert("You've reached your limit of 5 votes for today! Come back tomorrow.");
+    const count = voteData.bands[bandId] || 0;
+    if (count >= 5) {
+        alert("You've reached your limit of 5 votes for this band today! Come back tomorrow.");
         return false;
     }
-
-    // Increment and save
-    voteData.count += 1;
-    localStorage.setItem('user_votes', JSON.stringify(voteData));
     return true;
 }
 
-// --- UPDATED DATABASE ACTIONS ---
+// Record a successful vote locally (called AFTER DB update succeeds)
+function recordUserVote(bandId) {
+    const today = new Date().toISOString().slice(0,10);
+    const voteData = JSON.parse(localStorage.getItem('user_votes')) || { date: today, bands: {} };
 
-window.changeVote = async (id, newScore) => {
-    // Only allow the vote if the user hasn't hit their daily limit
-    if (!canUserVote()) return;
+    if (voteData.date !== today) {
+        voteData.date = today;
+        voteData.bands = {};
+    }
+
+    voteData.bands[bandId] = (voteData.bands[bandId] || 0) + 1;
+    localStorage.setItem('user_votes', JSON.stringify(voteData));
+}
+
+// --- UPDATED DATABASE ACTIONS ---
+// now takes (id, delta) where delta is 1 or -1
+window.changeVote = async (id, delta) => {
+    // Only allow the vote if the user hasn't hit their daily per-band limit
+    if (!canUserVote(id)) return;
 
     const bandRef = doc(db, 'bands', id);
     try {
+        // Use atomic increment to avoid race conditions
         await updateDoc(bandRef, { 
-            score: newScore,
+            score: increment(delta),
             lastVotedAt: Date.now() 
         });
+        // Only record the vote locally AFTER successful DB update
+        recordUserVote(id);
     } catch (error) {
         console.error("Error updating vote: ", error);
+        alert("There was a problem submitting your vote. Please try again.");
     }
 };
 
@@ -126,4 +141,3 @@ window.addBand = async () => {
     });
     input.value = "";
 };
-
