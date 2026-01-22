@@ -74,45 +74,59 @@ window.filterBands = () => {
     });
 };
 
-// --- NEW: VOTING LIMIT LOGIC (per-band, per-day) ---
+// --- UPDATED VOTING LIMIT LOGIC ---
+// New policy: allow only 1 positive vote per band per day, and up to 10 positive votes per day total.
+// NOTE: Only positive votes (delta === 1) count toward these limits. Negative votes are allowed but not tracked here.
 
-// Returns true if the user can vote on bandId today (doesn't change storage)
-function canUserVote(bandId) {
+// Returns true if the user can perform the vote (doesn't change storage)
+function canUserVote(bandId, delta) {
     const today = new Date().toISOString().slice(0,10); // YYYY-MM-DD
-    const voteData = JSON.parse(localStorage.getItem('user_votes')) || { date: today, bands: {} };
+    const voteData = JSON.parse(localStorage.getItem('user_votes')) || { date: today, bands: {}, total: 0 };
 
-    // Reset if it's a new day
+    // If it's a new day, allow voting (client-side data will be reset by recordUserVote when needed)
     if (voteData.date !== today) {
         return true; // no votes yet today
     }
 
-    const count = voteData.bands[bandId] || 0;
-    if (count >= 5) {
-        alert("You've reached your limit of 5 votes for this band today! Come back tomorrow.");
-        return false;
+    // Only enforce limits for positive votes
+    if (delta > 0) {
+        const bandCount = voteData.bands[bandId] || 0;
+        if (bandCount >= 1) {
+            alert("You've already voted for this band today. You can only vote once per band per day.");
+            return false;
+        }
+        const total = voteData.total || 0;
+        if (total >= 10) {
+            alert("You've reached your daily limit of 10 votes. Come back tomorrow!");
+            return false;
+        }
     }
     return true;
 }
 
 // Record a successful vote locally (called AFTER DB update succeeds)
-function recordUserVote(bandId) {
-    const today = new Date().toISOString().slice(0,10);
-    const voteData = JSON.parse(localStorage.getItem('user_votes')) || { date: today, bands: {} };
+function recordUserVote(bandId, delta) {
+    // Only record positive votes
+    if (delta <= 0) return;
 
+    const today = new Date().toISOString().slice(0,10);
+    let voteData = JSON.parse(localStorage.getItem('user_votes')) || { date: today, bands: {}, total: 0 };
+
+    // Reset if it's a new day
     if (voteData.date !== today) {
-        voteData.date = today;
-        voteData.bands = {};
+        voteData = { date: today, bands: {}, total: 0 };
     }
 
     voteData.bands[bandId] = (voteData.bands[bandId] || 0) + 1;
+    voteData.total = (voteData.total || 0) + 1;
     localStorage.setItem('user_votes', JSON.stringify(voteData));
 }
 
 // --- UPDATED DATABASE ACTIONS ---
 // now takes (id, delta) where delta is 1 or -1
 window.changeVote = async (id, delta) => {
-    // Only allow the vote if the user hasn't hit their daily per-band limit
-    if (!canUserVote(id)) return;
+    // Only enforce the vote limits for positive votes
+    if (!canUserVote(id, delta)) return;
 
     const bandRef = doc(db, 'bands', id);
     try {
@@ -121,8 +135,8 @@ window.changeVote = async (id, delta) => {
             score: increment(delta),
             lastVotedAt: Date.now() 
         });
-        // Only record the vote locally AFTER successful DB update
-        recordUserVote(id);
+        // Only record the positive vote locally AFTER successful DB update
+        recordUserVote(id, delta);
     } catch (error) {
         console.error("Error updating vote: ", error);
         alert("There was a problem submitting your vote. Please try again.");
