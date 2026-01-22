@@ -1,0 +1,26 @@
+body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; display: flex; justify-content: center; padding: 20px; }
+.container { width: 100%; max-width: 450px; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
+
+/* Trending & Search */
+.trending-box { background: #fff0f0; padding: 12px; border-radius: 8px; border: 1px dashed #ff4d4d; margin-bottom: 20px; }
+.trending-box h3 { margin: 0 0 8px 0; font-size: 0.8rem; color: #ff4d4d; text-transform: uppercase; }
+#trendingList { list-style: none; padding: 0; font-size: 0.85rem; }
+
+.input-section, .search-section { display: flex; gap: 10px; margin-bottom: 15px; }
+input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 6px; }
+#searchInput { border-radius: 20px; background: #fafafa; }
+
+/* List Styling */
+ul { list-style: none; padding: 0; }
+li { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #eee; transition: 0.3s; }
+
+/* Rank Styling */
+li.first-place { 
+    background: #fff9c4; border: 2px solid #ffd700; font-weight: bold; 
+    transform: scale(1.03); border-radius: 8px; margin-bottom: 8px; 
+}
+
+.vote-btns { display: flex; align-items: center; gap: 8px; }
+.vote-btns button { cursor: pointer; border: none; background: #eee; padding: 5px 10px; border-radius: 4px; }
+.vote-btns button:hover { background: #ddd; }
+.score { font-weight: bold; min-width: 25px; text-align: center; }
