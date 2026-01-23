@@ -147,11 +147,34 @@ window.addBand = async () => {
     const input = document.getElementById('bandInput');
     if (!input.value.trim()) return;
 
-    await addDoc(bandsCol, {
-        name: input.value,
-        score: 0,
-        lastVotedAt: Date.now(),
-        createdAt: Date.now()
+    const rawName = input.value.trim();
+    // Normalize: trim, collapse internal whitespace, lowercase for comparison
+    const normalized = rawName.replace(/\s+/g, ' ').toLowerCase();
+
+    // Check existing bands for duplicates using normalizedName if available,
+    // otherwise compare normalized forms of stored name.
+    const isDuplicate = allBands.some(b => {
+        if (b.normalizedName) return b.normalizedName === normalized;
+        if (typeof b.name === 'string') return b.name.replace(/\s+/g, ' ').trim().toLowerCase() === normalized;
+        return false;
     });
-    input.value = "";
+
+    if (isDuplicate) {
+        alert("That band already exists. Please add a different name.");
+        return;
+    }
+
+    try {
+        await addDoc(bandsCol, {
+            name: rawName,
+            normalizedName: normalized, // store to help future duplicate checks / server-side rules
+            score: 0,
+            lastVotedAt: Date.now(),
+            createdAt: Date.now()
+        });
+        input.value = "";
+    } catch (error) {
+        console.error("Error adding band: ", error);
+        alert("There was a problem adding the band. Please try again.");
+    }
 };
