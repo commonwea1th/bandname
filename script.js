@@ -18,6 +18,98 @@ const bandsCol = collection(db, 'bands');
 
 let allBands = [];
 
+// -- Configuration: inactive threshold (days)
+const INACTIVE_DAYS = 30;
+const INACTIVE_MS = INACTIVE_DAYS * 24 * 60 * 60 * 1000;
+
+// Utility: normalize various timestamp shapes to a number (ms since epoch)
+function getLatestTimestamp(band) {
+    // Prefer lastVotedAt, fall back to createdAt, otherwise 0
+    const candidate = band?.lastVotedAt ?? band?.createdAt ?? 0;
+    if (!candidate) return 0;
+
+    // If it's a Firestore Timestamp object (has toMillis), use that
+    if (candidate?.toMillis && typeof candidate.toMillis === 'function') {
+        return candidate.toMillis();
+    }
+    // If it's already a number (ms)
+    if (typeof candidate === 'number') return candidate;
+    // If stored as string, try to parse
+    const n = Number(candidate);
+    return isNaN(n) ? 0 : n;
+}
+
+function isBandActive(band) {
+    const ts = getLatestTimestamp(band);
+    return ts >= (Date.now() - INACTIVE_MS);
+}
+
+// Ensure the dumpster container exists in the DOM (create it if missing)
+function ensureDumpsterBox() {
+    let dumpster = document.getElementById('dumpsterBox');
+    if (dumpster) return dumpster;
+
+    dumpster = document.createElement('div');
+    dumpster.id = 'dumpsterBox';
+    dumpster.style.marginTop = '20px';
+    dumpster.style.padding = '12px';
+    dumpster.style.borderRadius = '8px';
+    dumpster.style.background = 'linear-gradient(90deg, #2b2b2b, #1b1b1b)';
+    dumpster.style.color = '#fff';
+    dumpster.style.border = '2px solid #ff6b00';
+    dumpster.style.boxShadow = '0 6px 18px rgba(255,107,0,0.15)';
+    dumpster.innerHTML = `
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+            <div style="font-size:22px;">🔥🗑️ Burning Dumpster</div>
+            <small style="color:#ffbf80;">(Bands not voted on in the last ${INACTIVE_DAYS} days)</small>
+        </div>
+        <ul id="dumpsterList" style="list-style:none; padding:0; margin:0; max-height:220px; overflow:auto;"></ul>
+    `;
+
+    // Append after the main bandList if present, otherwise append to body
+    const bandList = document.getElementById('bandList');
+    if (bandList && bandList.parentNode) {
+        bandList.parentNode.appendChild(dumpster);
+    } else {
+        document.body.appendChild(dumpster);
+    }
+
+    return dumpster;
+}
+
+// Render the dumpster list (inactive bands)
+function renderDumpster(bands) {
+    const dumpster = ensureDumpsterBox();
+    const dumpsterList = document.getElementById('dumpsterList');
+    dumpsterList.innerHTML = '';
+
+    if (!bands.length) {
+        const li = document.createElement('li');
+        li.style.opacity = '0.7';
+        li.textContent = 'No neglected bands — the dumpster is empty.';
+        dumpsterList.appendChild(li);
+        return;
+    }
+
+    bands.forEach(band => {
+        const lastTs = getLatestTimestamp(band);
+        const daysAgo = lastTs ? Math.floor((Date.now() - lastTs) / (24 * 60 * 60 * 1000)) : 'unknown';
+        const li = document.createElement('li');
+        li.style.display = 'flex';
+        li.style.justifyContent = 'space-between';
+        li.style.padding = '6px 8px';
+        li.style.borderBottom = '1px solid rgba(255,255,255,0.04)';
+        li.innerHTML = `
+            <span style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:16px;">🗑️</span>
+                <strong style="color:#ffb86b;">${band.name}</strong>
+            </span>
+            <small style="color:#ccc;">last voted: ${lastTs ? daysAgo + ' day(s) ago' : 'never'}</small>
+        `;
+        dumpsterList.appendChild(li);
+    });
+}
+
 // 1. LISTEN FOR ALL BANDS (Ranked by Score)
 const q = query(bandsCol, orderBy("score", "desc"));
 onSnapshot(q, (snapshot) => {
@@ -32,12 +124,14 @@ onSnapshot(q, (snapshot) => {
 const trendingQuery = query(bandsCol, orderBy("lastVotedAt", "desc"), limit(3));
 onSnapshot(trendingQuery, (snapshot) => {
     const trendingList = document.getElementById('trendingList');
+    if (!trendingList) return;
     trendingList.innerHTML = '';
     const dayAgo = Date.now() - (24 * 60 * 60 * 1000);
     
-    snapshot.forEach(docSnap => {
+snapshot.forEach(docSnap => {
         const band = docSnap.data();
-        if (band.lastVotedAt > dayAgo) {
+        const last = getLatestTimestamp(band);
+        if (last > dayAgo) {
             const li = document.createElement('li');
             li.innerHTML = `🔥 ${band.name} <small style="color:gray; margin-left:10px;">just voted</small>`;
             trendingList.appendChild(li);
@@ -47,13 +141,22 @@ onSnapshot(trendingQuery, (snapshot) => {
 
 // 3. SEARCH & RENDER LOGIC
 window.filterBands = () => {
-    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+    const searchTerm = document.getElementById('searchInput')?.value.toLowerCase() || '';
     const list = document.getElementById('bandList');
+    if (!list) return;
     list.innerHTML = '';
 
+    // Bands matching the search (active candidates)
     const filtered = allBands.filter(b => b.name.toLowerCase().includes(searchTerm));
 
-    filtered.forEach((band, index) => {
+    // Determine active vs inactive using lastVotedAt/createdAt; inactive => goes to dumpster
+    const activeFiltered = filtered.filter(isBandActive);
+
+    // For the dumpster, show all inactive bands regardless of search term so they always "drop off"
+    const dumpsterBands = allBands.filter(b => !isBandActive(b));
+
+    // Render active list (ranked, with badges)
+    activeFiltered.forEach((band, index) => {
         let badge = "";
         let topClass = "";
         if (index === 0 && searchTerm === "") { badge = "🥇"; topClass = "first-place"; }
@@ -72,11 +175,14 @@ window.filterBands = () => {
         `;
         list.appendChild(li);
     });
+
+    // Render dumpster (inactive bands)
+    renderDumpster(dumpsterBands);
 };
 
 // --- UPDATED VOTING LIMIT LOGIC ---
 // New policy: allow only 1 positive vote per band per day, and up to 10 positive votes per day total.
-// NOTE: Only positive votes (delta === 1) count toward these limits. Negative votes are allowed but not tracked here.
+// NOTE: Only positive votes (delta === 1) count toward these limits.
 
 // Returns true if the user can perform the vote (doesn't change storage)
 function canUserVote(bandId, delta) {
